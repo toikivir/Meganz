@@ -24,12 +24,41 @@ async function api (path, options) {
   }
   if (!res.ok) {
     const err = new Error((data && data.error) || `Request failed (${res.status})`)
-    err.code = data && data.code
+    err.code = (data && data.code) || ((res.status === 502 || res.status === 504) ? 'NETWORK' : undefined)
     err.retryAfter = data && data.retryAfter
     err.status = res.status
     throw err
   }
   return data
+}
+
+// ---------------------------------------------------------------- direct mode
+// When the server cannot reach MEGA, resolve and fetch through the user's
+// browser instead (MEGA's API allows cross-origin access).
+let directModule = null
+function direct () {
+  if (!directModule) directModule = import('./direct.js')
+  return directModule
+}
+
+function isNetworkish (err) {
+  return err && (err.code === 'NETWORK' || err.status === 502 || err.status === 504)
+}
+
+async function resolveVia (payload) {
+  try {
+    return { info: await api('/api/info', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }), mode: 'server' }
+  } catch (err) {
+    if (!isNetworkish(err) || payload.demo) throw err
+    setFormStatus('This server cannot reach MEGA — resolving through your browser instead…')
+    const { directInfo } = await direct()
+    const info = await directInfo(payload.url)
+    return { info, mode: 'direct' }
+  }
 }
 
 const state = {
@@ -64,12 +93,57 @@ const KIND_ICONS = { video: '🎬', audio: '🎵', image: '🖼️', other: '�
 const selectedFiles = new Map()
 
 function triggerDownload (entry) {
+  if (entry.direct) {
+    directDownloadFlow(fileEntryToInfo(entry)).catch(() => {})
+    return
+  }
   const a = document.createElement('a')
   a.href = entry.links.download
   a.rel = 'noopener'
   document.body.appendChild(a)
   a.click()
   a.remove()
+}
+
+function saveBlob (blob, name) {
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = name
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(a.href), 60_000)
+}
+
+function setProgress (pct, label) {
+  $('progress-fill').style.width = Math.max(0, Math.min(100, pct)) + '%'
+  if (label != null) $('progress-label').textContent = label
+}
+
+async function directDownloadFlow (info, { play } = {}) {
+  try {
+    setFormStatus('Fetching through your browser (direct mode)…')
+    setProgress(0, play ? 'Buffering through your browser…' : 'Downloading through your browser…')
+    const { directFetch } = await direct()
+    const blob = await directFetch(info.directUrl || info.sourceUrl, {
+      onProgress: ({ bytesLoaded, bytesTotal }) => {
+        const pct = bytesTotal ? (bytesLoaded / bytesTotal) * 100 : 0
+        setProgress(pct, `Direct mode — ${fmtBytes(bytesLoaded)} / ${fmtBytes(bytesTotal)} via your browser`)
+      }
+    })
+    setProgress(100, `Done — ${fmtBytes(blob.size)} fetched through your browser (server cache unavailable here)`)
+    setFormStatus('Done (direct mode)', 'ok')
+    if (play) {
+      openPlayer(URL.createObjectURL(blob), info.kind)
+    } else {
+      saveBlob(blob, info.name)
+    }
+    return blob
+  } catch (err) {
+    setFormStatus(friendlyError(err), 'error')
+    setProgress(0, `Direct mode failed: ${err.message}`)
+    throw err
+  }
 }
 
 function updateBulkBar () {
@@ -98,7 +172,10 @@ function fileEntryToInfo (entry) {
     kind: entry.kind,
     playable: entry.playable,
     demo: entry.demo || false,
-    links: entry.links
+    links: entry.links || {},
+    direct: Boolean(entry.direct),
+    directUrl: entry.directUrl,
+    sourceUrl: entry.directUrl
   }
 }
 
@@ -232,7 +309,9 @@ function showFolder (info) {
   $('folder-badge').textContent = info.truncated ? 'folder (partial listing)' : 'folder'
 
   $('folder-copy-btn').onclick = async () => {
-    const url = location.origin + `/v/${info.token}`
+    const url = info.direct
+      ? (info.sourceUrl || location.href)
+      : location.origin + `/v/${info.token}`
     try {
       await navigator.clipboard.writeText(url)
       $('folder-copy-btn').textContent = '✓ Copied!'
@@ -284,19 +363,30 @@ function showFile (info) {
     info.kind === 'video' ? 'Video' : info.kind === 'audio' ? 'Audio' : info.kind === 'image' ? 'Image' : 'File'
 
   const dl = $('download-btn')
-  dl.href = info.links.download
+  if (info.direct) {
+    dl.removeAttribute('href')
+    dl.onclick = () => directDownloadFlow(info).catch(() => {})
+  } else {
+    dl.href = info.links.download
+    dl.onclick = null
+  }
 
   const playBtn = $('play-btn')
   if (info.playable) {
     playBtn.hidden = false
     playBtn.textContent = info.kind === 'audio' ? '▶ Play audio' : '▶ Play online'
-    playBtn.onclick = () => openPlayer(info)
+    playBtn.onclick = () => {
+      if (info.direct) directDownloadFlow(info, { play: true }).catch(() => {})
+      else openPlayer(info.links.stream, info.kind)
+    }
   } else {
     playBtn.hidden = true
   }
 
   $('copy-btn').onclick = async () => {
-    const url = location.origin + info.links.watch
+    const url = info.direct
+      ? (info.sourceUrl || info.directUrl)
+      : location.origin + info.links.watch
     try {
       await navigator.clipboard.writeText(url)
       $('copy-btn').textContent = '✓ Copied!'
@@ -319,7 +409,7 @@ function showFile (info) {
     back.textContent = '← Folder'
     back.onclick = () => {
       const ctx = state.folderContext
-      history.replaceState(null, '', `/v/${ctx.token}`)
+      if (ctx.token) history.replaceState(null, '', `/v/${ctx.token}`)
       showFolder(ctx.info)
     }
   } else if (info.parent) {
@@ -342,20 +432,26 @@ function showFile (info) {
   result.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
-function openPlayer (info) {
+function openPlayer (mediaUrl, kind) {
   $('player-card').hidden = false
   if (state.player) state.player.destroy()
   state.player = initPlayer({
-    mediaUrl: info.links.stream,
-    kind: info.kind
+    mediaUrl,
+    kind: kind || 'video'
   })
-  state.player.updateCached(state.lastRanges || [], info.size)
+  state.player.updateCached(state.lastRanges || [], (state.info && state.info.size) || 0)
   $('player-card').scrollIntoView({ behavior: 'smooth', block: 'nearest' })
 }
 
 // ---------------------------------------------------------------- state polling
 function startPolling () {
   if (state.pollTimer) clearInterval(state.pollTimer)
+  if (state.info && state.info.direct) {
+    // Direct mode: no server cache to poll — bytes flow through the browser.
+    $('cache-badge').textContent = 'direct mode'
+    setProgress(0, 'Direct mode — this file is fetched through your browser on demand (no server cache in this environment)')
+    return
+  }
   state.lastCachedBytes = 0
   state.lastPollAt = Date.now()
   const tick = () => pollState().catch(() => {})
@@ -417,18 +513,15 @@ async function resolveInput (payload) {
   setFormStatus('Fetching file info…')
   $('fetch-btn').disabled = true
   try {
-    const info = await api('/api/info', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    })
+    const { info, mode } = await resolveVia(payload)
+    const suffix = mode === 'direct' ? ' (direct mode — via your browser)' : ''
     if (info.type === 'folder') {
-      setFormStatus(`Ready: ${info.name}`, 'ok')
-      history.replaceState(null, '', `/v/${info.token}`)
+      setFormStatus(`Ready${suffix}: ${info.name}`, 'ok')
+      if (!info.direct) history.replaceState(null, '', `/v/${info.token}`)
       showFolder(info)
     } else {
-      setFormStatus(`Ready: ${info.name}`, 'ok')
-      history.replaceState(null, '', info.links.watch)
+      setFormStatus(`Ready${suffix}: ${info.name}`, 'ok')
+      if (!info.direct) history.replaceState(null, '', info.links.watch)
       hideFolder()
       showFile(info)
     }
@@ -484,7 +577,7 @@ async function boot () {
       } else {
         hideFolder()
         showFile(info)
-        if (info.playable) openPlayer(info)
+        if (info.playable) openPlayer(info.links.stream, info.kind)
       }
     } catch (err) {
       setFormStatus(friendlyError(err), 'error')

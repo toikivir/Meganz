@@ -1,4 +1,4 @@
-import { File } from 'megajs'
+import { File, API } from 'megajs'
 import { Readable, Transform } from 'node:stream'
 import { config } from '../config.js'
 import { FillError } from '../cache.js'
@@ -6,6 +6,17 @@ import { encodeToken, parseMegaLink } from '../links.js'
 
 const MAX_FOLDER_ENTRIES = 1000
 const MAX_FOLDER_DEPTH = 8
+
+// Fail fast on hanging connections: without this, a blackholed network makes
+// the request hang until some proxy answers with a bare 502 page.
+const MEGA_TIMEOUT_MS = Number(process.env.MEGA_TIMEOUT_MS || 15000)
+const megaApi = new API(false, {
+  fetch (url, opts = {}) {
+    const timeout = AbortSignal.timeout(MEGA_TIMEOUT_MS)
+    const signal = opts.signal ? AbortSignal.any([opts.signal, timeout]) : timeout
+    return fetch(url, { ...opts, signal })
+  }
+})
 
 function limiter (stream, maxBytes) {
   let sent = 0
@@ -39,7 +50,7 @@ export function createMegaSource (descriptor) {
       filePromise = (async () => {
         let f
         try {
-          f = File.fromURL(descriptor.u)
+          f = File.fromURL(descriptor.u, { api: megaApi })
         } catch (err) {
           throw new FillError(`Invalid MEGA link: ${err.message}`, { code: 'BAD_LINK', status: 400 })
         }
@@ -60,7 +71,7 @@ export function createMegaSource (descriptor) {
   function toFillError (err) {
     if (err instanceof FillError) return err
     const message = String(err && err.message ? err.message : err)
-    if (/fetch failed|ENOTFOUND|ECONNREFUSED|ECONNRESET|EAI_AGAIN|EPIPE|ETIMEDOUT|getaddrinfo|socket hang up|network|certificate/i.test(message)) {
+    if (/fetch failed|ENOTFOUND|ECONNREFUSED|ECONNRESET|EAI_AGAIN|EPIPE|ETIMEDOUT|getaddrinfo|socket hang up|network|certificate|aborted|The operation was aborted|The operation timed out/i.test(message)) {
       return new FillError('Could not reach MEGA from this server — check its outbound connectivity.', {
         code: 'NETWORK',
         status: 502,

@@ -253,9 +253,21 @@ function wrap (fn) {
 
 const bootId = process.env.BOOT_ID || crypto.randomUUID()
 
+// Direct-mode fallback lets the browser talk to MEGA itself when this server
+// has no route to mega.nz — so CSP must allow those hosts.
+const CSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
+  "media-src 'self' blob:; connect-src 'self' https://*.mega.nz https://*.mega.co.nz https://*.megapds.com https://*.userstorage.mega.co.nz; " +
+  "base-uri 'none'; form-action 'self'; frame-ancestors 'self'"
+
 // ---------------------------------------------------------------- API
 app.get('/api/health', (req, res) => {
   res.json({ ok: true, demoMode: config.demoMode, bootId })
+})
+
+// Shared link parser for the browser's direct mode (single source of truth).
+app.get('/lib/links.js', (req, res) => {
+  res.type('application/javascript')
+  res.sendFile(path.join(config.root, 'server', 'links.js'))
 })
 
 app.get('/api/stats', apiLimiter, (req, res) => {
@@ -320,16 +332,14 @@ app.use(express.static(publicDir, {
   setHeaders (res, filePath) {
     if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache')
     if (filePath.endsWith('.html')) {
-      res.setHeader('Content-Security-Policy',
-        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'self'")
+      res.setHeader('Content-Security-Policy', CSP)
     }
   }
 }))
 
 app.get(['/v/:token', '/'], (req, res) => {
   res.setHeader('Cache-Control', 'no-cache')
-  res.setHeader('Content-Security-Policy',
-    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'self'")
+  res.setHeader('Content-Security-Policy', CSP)
   res.sendFile(path.join(publicDir, 'index.html'))
 })
 

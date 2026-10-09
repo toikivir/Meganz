@@ -240,6 +240,17 @@ async function run () {
     })
     ok('rejects non-MEGA hosts', evil.status === 400)
 
+    // Direct-mode browser fallback assets
+    const linksLib = await fetch(`${BASE}/lib/links.js`)
+    ok('serves shared link parser for direct mode', linksLib.status === 200 && (await linksLib.text()).includes('parseMegaLink'))
+    const vendor = await fetch(`${BASE}/vendor/megajs.mjs`)
+    ok('serves megajs browser bundle', vendor.status === 200 && (await vendor.text()).includes('export'))
+    const directMod = await fetch(`${BASE}/direct.js`)
+    ok('serves direct-mode module', directMod.status === 200 && (await directMod.text()).includes('directInfo'))
+    const page = await fetch(`${BASE}/`)
+    const csp = page.headers.get('content-security-policy') || ''
+    ok('CSP allows direct MEGA access', csp.includes('*.mega.co.nz') && csp.includes('*.megapds.com'))
+
     // Regression: real-format folder links must reach the folder pipeline
     // (previously they were rejected before any MEGA call). Offline-safe:
     // the request may fail with a network/upstream error, but never with

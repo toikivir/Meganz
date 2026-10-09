@@ -315,7 +315,7 @@ class CacheEntry extends EventEmitter {
     if (/rate limit|invalid response/i.test(message)) {
       return new FillError('MEGA is rate-limiting this server right now', { code: 'RATE', retryAfter: 30, status: 503 })
     }
-    if (/fetch failed|ENOTFOUND|ECONNREFUSED|ECONNRESET|EAI_AGAIN|EPIPE|ETIMEDOUT|getaddrinfo|socket hang up|network|certificate/i.test(message)) {
+    if (/fetch failed|ENOTFOUND|ECONNREFUSED|ECONNRESET|EAI_AGAIN|EPIPE|ETIMEDOUT|getaddrinfo|socket hang up|network|certificate|aborted|The operation was aborted|The operation timed out/i.test(message)) {
       return new FillError('Could not reach MEGA from this server — check its outbound connectivity.', {
         code: 'NETWORK',
         retryAfter: 30,
