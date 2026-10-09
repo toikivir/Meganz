@@ -1,0 +1,21 @@
+{
+  "name": "meganz",
+  "version": "1.0.0",
+  "description": "Direct download & fast online video streaming for public MEGA links — no transfer-quota worries for your visitors.",
+  "main": "server/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "demo": "DEMO_MODE=1 node server/index.js",
+    "test": "node test/smoke.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "megajs": "^1.3.10"
+  },
+  "license": "MIT"
+}
