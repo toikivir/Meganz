@@ -251,6 +251,11 @@ async function run () {
     const csp = page.headers.get('content-security-policy') || ''
     ok('CSP allows direct MEGA access', csp.includes('*.mega.co.nz') && csp.includes('*.megapds.com'))
 
+    // Stale cached app.js once hid the direct-mode fix from users for up to an hour.
+    const appJs = await fetch(`${BASE}/app.js`)
+    ok('app code is served with no-cache', (appJs.headers.get('cache-control') || '').includes('no-cache'))
+    ok('app code actually contains direct mode', (await appJs.text()).includes('directDownloadFlow'))
+
     // Regression: real-format folder links must reach the folder pipeline
     // (previously they were rejected before any MEGA call). Offline-safe:
     // the request may fail with a network/upstream error, but never with

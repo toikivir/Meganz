@@ -328,9 +328,14 @@ const publicDir = path.join(config.root, 'public')
 
 app.use(express.static(publicDir, {
   index: false,
-  maxAge: '1h',
   setHeaders (res, filePath) {
-    if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache')
+    if (filePath.endsWith('.html') || filePath.endsWith('.js') || filePath.endsWith('.mjs') || filePath.endsWith('.css')) {
+      // App code must revalidate on every load — a stale app.js means users
+      // keep running old logic (e.g. no direct-mode fallback) for up to an hour.
+      res.setHeader('Cache-Control', 'no-cache')
+    } else {
+      res.setHeader('Cache-Control', 'public, max-age=3600')
+    }
     if (filePath.endsWith('.html')) {
       res.setHeader('Content-Security-Policy', CSP)
     }
