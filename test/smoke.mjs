@@ -171,6 +171,31 @@ async function run () {
     })
     ok('rejects non-MEGA hosts', evil.status === 400)
 
+    // Regression: real-format folder links must reach the folder pipeline
+    // (previously they were rejected before any MEGA call). Offline-safe:
+    // the request may fail with a network/upstream error, but never with
+    // "folder links are not supported".
+    for (const [label, url, expectFolder] of [
+      ['folder', 'https://mega.nz/folder/AbCdEf123456#ZzYyXxWwVvTt', true],
+      ['legacy folder', 'https://mega.nz/#F!AbCdEf123456!ZzYyXxWwVvTt', true],
+      ['file', 'https://mega.nz/file/AbCdEf123456#ZzYyXxWwVvTt', false]
+    ]) {
+      const res = await fetch(`${BASE}/api/info`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url })
+      })
+      const body = await res.json()
+      const rejected =
+        body.code === 'FOLDER' || body.code === 'BAD_LINK' || /not supported/i.test(body.error || '')
+      if (res.ok) {
+        ok(`real ${label} link resolves`, expectFolder ? body.type === 'folder' : body.type === 'file')
+      } else {
+        ok(`real ${label} link reaches MEGA pipeline`, !rejected && res.status >= 500,
+          rejected ? `blocked early: ${body.code} ${body.error}` : `upstream: ${body.code || res.status}`)
+      }
+    }
+
     console.log('smoke: cache persistence across restart')
     await stopServer()
     await startServer()

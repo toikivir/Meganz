@@ -68,8 +68,16 @@
               <span class="badge-mini" id="folder-badge">folder</span>
             </div>
           </div>
+          <div class="folder-actions">
+            <button class="btn btn-ghost" id="folder-copy-btn">⧉ Copy folder link</button>
+          </div>
         </div>
-        <p class="folder-hint">Click a file to download it or play it online. Sub-folders open inline.</p>
+        <p class="folder-hint">Click a file to download or play it · tick <strong>☑</strong> to select several at once · double-click for an instant download. Sub-folders open inline.</p>
+        <div class="bulk-bar" id="bulk-bar" hidden>
+          <span class="bulk-count" id="bulk-count">0 selected</span>
+          <button class="btn btn-primary" id="bulk-download">⤓ Download selected</button>
+          <button class="btn btn-ghost" id="bulk-clear">Clear</button>
+        </div>
         <div class="folder-tree" id="folder-tree"></div>
       </div>
 

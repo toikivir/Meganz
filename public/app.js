@@ -60,6 +60,25 @@ function friendlyError (err) {
 // ---------------------------------------------------------------- folder browser
 const KIND_ICONS = { video: '🎬', audio: '🎵', image: '🖼️', other: '📦' }
 
+// Multi-select state for folder browsing: checkbox -> file entry
+const selectedFiles = new Map()
+
+function triggerDownload (entry) {
+  const a = document.createElement('a')
+  a.href = entry.links.download
+  a.rel = 'noopener'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+}
+
+function updateBulkBar () {
+  const bar = $('bulk-bar')
+  const n = selectedFiles.size
+  bar.hidden = n === 0
+  $('bulk-count').textContent = `${n} file${n === 1 ? '' : 's'} selected`
+}
+
 function fmtDate (ts) {
   if (!ts) return ''
   try {
@@ -120,9 +139,21 @@ function renderTree (entries, container) {
       wrap.append(head, kids)
       container.appendChild(wrap)
     } else {
-      const row = document.createElement('button')
-      row.type = 'button'
+      const row = document.createElement('div')
+      row.role = 'button'
+      row.tabIndex = 0
       row.className = 'tree-row file-row'
+
+      const check = document.createElement('input')
+      check.type = 'checkbox'
+      check.className = 'tree-check'
+      check.title = 'Select for batch download'
+      check.addEventListener('click', (e) => e.stopPropagation())
+      check.addEventListener('change', () => {
+        if (check.checked) selectedFiles.set(check, entry)
+        else selectedFiles.delete(check)
+        updateBulkBar()
+      })
 
       const icon = document.createElement('span')
       icon.className = 'tree-icon'
@@ -138,7 +169,7 @@ function renderTree (entries, container) {
         entry.playable ? '▶ playable' : ''
       ].filter(Boolean).join(' · ')
 
-      row.append(icon, name, meta)
+      row.append(check, icon, name, meta)
 
       if (entry.playable) {
         const badge = document.createElement('span')
@@ -152,12 +183,21 @@ function renderTree (entries, container) {
       dl.textContent = '⤓'
       dl.addEventListener('click', (e) => {
         e.stopPropagation()
-        window.location.href = entry.links.download
+        triggerDownload(entry)
       })
       row.appendChild(dl)
 
       row.addEventListener('click', () => {
         selectFolderFile(entry)
+      })
+      row.addEventListener('dblclick', () => {
+        triggerDownload(entry)
+      })
+      row.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          selectFolderFile(entry)
+        }
       })
 
       container.appendChild(row)
@@ -184,6 +224,20 @@ function showFolder (info) {
   $('folder-sub').textContent =
     `${c.files} file${c.files === 1 ? '' : 's'}${c.folders ? ` · ${c.folders} sub-folder${c.folders === 1 ? '' : 's'}` : ''} · ${fmtBytes(c.bytes)}`
   $('folder-badge').textContent = info.truncated ? 'folder (partial listing)' : 'folder'
+
+  $('folder-copy-btn').onclick = async () => {
+    const url = location.origin + `/v/${info.token}`
+    try {
+      await navigator.clipboard.writeText(url)
+      $('folder-copy-btn').textContent = '✓ Copied!'
+    } catch {
+      prompt('Copy this link:', url)
+    }
+    setTimeout(() => { $('folder-copy-btn').textContent = '⧉ Copy folder link' }, 1800)
+  }
+
+  selectedFiles.clear()
+  updateBulkBar()
 
   const tree = $('folder-tree')
   tree.textContent = ''
@@ -316,6 +370,21 @@ async function pollState () {
 }
 
 // ---------------------------------------------------------------- input flow
+$('bulk-download').addEventListener('click', () => {
+  // Staggered anchor clicks; the browser may ask to allow multiple downloads.
+  let i = 0
+  for (const entry of selectedFiles.values()) {
+    setTimeout(() => triggerDownload(entry), i * 700)
+    i++
+  }
+})
+
+$('bulk-clear').addEventListener('click', () => {
+  for (const check of selectedFiles.keys()) check.checked = false
+  selectedFiles.clear()
+  updateBulkBar()
+})
+
 async function resolveInput (payload) {
   setFormStatus('Fetching file info…')
   $('fetch-btn').disabled = true

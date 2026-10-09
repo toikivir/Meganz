@@ -43,21 +43,31 @@ export function createMegaSource (descriptor) {
         } catch (err) {
           throw new FillError(`Invalid MEGA link: ${err.message}`, { code: 'BAD_LINK', status: 400 })
         }
-        if (f.directory && !f.loadedFile) {
-          throw new FillError('Folder links are not supported yet — copy the link of a single file.', {
-            code: 'FOLDER',
-            status: 400
-          })
-        }
+        // Folder links are fine: loadAttributes() returns the folder root with
+        // its children tree (list() walks it); file-in-folder links return the
+        // target node; plain file links return the file.
         try {
           return await f.loadAttributes()
         } catch (err) {
           filePromise = null
-          throw err
+          throw toFillError(err)
         }
       })()
     }
     return filePromise
+  }
+
+  function toFillError (err) {
+    if (err instanceof FillError) return err
+    const message = String(err && err.message ? err.message : err)
+    if (/fetch failed|ENOTFOUND|ECONNREFUSED|ECONNRESET|EAI_AGAIN|EPIPE|ETIMEDOUT|getaddrinfo|socket hang up|network|certificate/i.test(message)) {
+      return new FillError('Could not reach MEGA from this server — check its outbound connectivity.', {
+        code: 'NETWORK',
+        status: 502,
+        retryAfter: 30
+      })
+    }
+    return new FillError(message, { code: 'UPSTREAM', status: 502, retryAfter: 15 })
   }
 
   return {
