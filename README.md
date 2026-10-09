@@ -19,8 +19,9 @@ exceeded" screens.
   and no MEGA app required.
 - 🧩 **All public link formats** — `mega.nz/file/…#…`, `mega.nz/#!…!…`, files inside shared
   folders (`/folder/…#…/file/…`), and **full folder links** with an in-page tree browser.
-- 📁 **Folder browsing** — paste a folder link, expand sub-folders inline, and download or play
-  any file you pick — each one gets its own direct link and player.
+- 📁 **Folder browsing** — paste a folder link, expand sub-folders inline, filter by name,
+  multi-select files for batch download, and download or play any file you pick. Files opened
+  from a folder link get a "Browse folder" button back to their parent folder.
 - 🚫 **No accounts, no tracking** — no login, no analytics; link keys live only inside the token
   and the server cache.
 

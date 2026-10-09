@@ -1,8 +1,9 @@
 import express from 'express'
 import path from 'node:path'
+import crypto from 'node:crypto'
 import { config } from './config.js'
 import { CacheStore, FillError } from './cache.js'
-import { tokenFromInput, decodeToken, isFolderDescriptor, LinkError } from './links.js'
+import { tokenFromInput, decodeToken, isFolderDescriptor, parseMegaLink, encodeToken, LinkError } from './links.js'
 import { mediaInfo, contentDisposition } from './mime.js'
 import { parseRange } from './ranges.js'
 import { createMegaSource } from './sources/mega.js'
@@ -169,7 +170,25 @@ async function infoForToken (token) {
     const info = await source.resolve()
     return { name: info.name, size: info.size, mime: mediaInfo(info.name).mime }
   })
-  return describeEntry(entry, token)
+  const info = describeEntry(entry, token)
+  // Files that live inside a shared folder: offer browsing the parent folder.
+  if (descriptor.demo === 'folder-file') {
+    const parentToken = encodeToken({ demo: 'folder' })
+    info.parent = {
+      token: parentToken,
+      links: { browse: `/v/${parentToken}`, folder: `/api/folder/${parentToken}` }
+    }
+  } else if (descriptor.u) {
+    const link = parseMegaLink(descriptor.u)
+    if (link.kind === 'folder-file') {
+      const parentToken = encodeToken({ u: `https://mega.nz/folder/${link.downloadId}#${link.key}` })
+      info.parent = {
+        token: parentToken,
+        links: { browse: `/v/${parentToken}`, folder: `/api/folder/${parentToken}` }
+      }
+    }
+  }
+  return info
 }
 
 function serveEntry (req, res, entry, { attachment }) {
@@ -232,9 +251,11 @@ function wrap (fn) {
   return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next)
 }
 
+const bootId = process.env.BOOT_ID || crypto.randomUUID()
+
 // ---------------------------------------------------------------- API
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, demoMode: config.demoMode })
+  res.json({ ok: true, demoMode: config.demoMode, bootId })
 })
 
 app.get('/api/stats', apiLimiter, (req, res) => {

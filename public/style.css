@@ -389,6 +389,27 @@ em { font-style: normal; background: var(--grad); -webkit-background-clip: text;
   flex-shrink: 0;
 }
 
+.folder-toolbar {
+  display: flex;
+}
+.folder-filter {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.22);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 0.93rem;
+  outline: 0;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.folder-filter:focus {
+  border-color: rgba(255, 77, 109, 0.55);
+  box-shadow: 0 0 0 3px rgba(255, 77, 109, 0.14);
+}
+.folder-filter::placeholder { color: var(--text-faint); }
+
 .bulk-bar {
   display: flex;
   align-items: center;

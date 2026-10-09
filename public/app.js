@@ -102,9 +102,11 @@ function fileEntryToInfo (entry) {
   }
 }
 
-function renderTree (entries, container) {
+function renderTree (entries, container, filter = '') {
   for (const entry of entries) {
     if (entry.type === 'folder') {
+      const nameMatch = !filter || entry.name.toLowerCase().includes(filter)
+
       const wrap = document.createElement('div')
       wrap.className = 'tree-folder open'
 
@@ -129,7 +131,10 @@ function renderTree (entries, container) {
 
       const kids = document.createElement('div')
       kids.className = 'tree-kids'
-      renderTree(entry.children || [], kids)
+      renderTree(entry.children || [], kids, nameMatch && filter ? '' : filter)
+
+      // Hide folders that match neither their name nor any descendant.
+      if (filter && !nameMatch && kids.childElementCount === 0) continue
 
       head.addEventListener('click', () => {
         const open = wrap.classList.toggle('open')
@@ -139,6 +144,7 @@ function renderTree (entries, container) {
       wrap.append(head, kids)
       container.appendChild(wrap)
     } else {
+      if (filter && !entry.name.toLowerCase().includes(filter)) continue
       const row = document.createElement('div')
       row.role = 'button'
       row.tabIndex = 0
@@ -240,8 +246,14 @@ function showFolder (info) {
   updateBulkBar()
 
   const tree = $('folder-tree')
-  tree.textContent = ''
-  renderTree(info.entries || [], tree)
+  const filterInput = $('folder-filter')
+  filterInput.value = ''
+  const render = () => {
+    tree.textContent = ''
+    renderTree(info.entries || [], tree, filterInput.value.trim().toLowerCase())
+  }
+  filterInput.oninput = render
+  render()
 
   $('result').hidden = false
   $('result').scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -254,17 +266,7 @@ function hideFolder () {
 }
 
 function selectFolderFile (entry) {
-  const info = fileEntryToInfo(entry)
-  showFile(info)
-  const back = $('back-btn')
-  back.hidden = !state.folderContext
-  back.onclick = () => {
-    if (state.folderContext) {
-      const ctx = state.folderContext
-      history.replaceState(null, '', `/v/${ctx.token}`)
-      showFolder(ctx.info)
-    }
-  }
+  showFile(fileEntryToInfo(entry))
 }
 
 // ---------------------------------------------------------------- result card
@@ -309,6 +311,32 @@ function showFile (info) {
     state.player = null
   }
   $('player-card').hidden = true
+
+  // Back / browse-folder button
+  const back = $('back-btn')
+  if (state.folderContext) {
+    back.hidden = false
+    back.textContent = '← Folder'
+    back.onclick = () => {
+      const ctx = state.folderContext
+      history.replaceState(null, '', `/v/${ctx.token}`)
+      showFolder(ctx.info)
+    }
+  } else if (info.parent) {
+    back.hidden = false
+    back.textContent = '📁 Browse folder'
+    back.onclick = async () => {
+      try {
+        const folder = await api(`/api/folder/${info.parent.token}`)
+        history.replaceState(null, '', `/v/${info.parent.token}`)
+        showFolder(folder)
+      } catch (err) {
+        setFormStatus(friendlyError(err), 'error')
+      }
+    }
+  } else {
+    back.hidden = true
+  }
 
   startPolling()
   result.scrollIntoView({ behavior: 'smooth', block: 'start' })

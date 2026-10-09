@@ -91,7 +91,10 @@ function patternStream (start, end) {
 const KINDS = {
   video: { name: 'MegaDirect-demo-plasma.mp4', size: () => fs.statSync(FIXTURE).size },
   audio: { name: 'demo-soundtrack.wav', size: () => buildWav().length },
-  file: { name: 'demo-archive.bin', size: () => DEMO_FILE_SIZE }
+  file: { name: 'demo-archive.bin', size: () => DEMO_FILE_SIZE },
+  // A file that "lives inside" the demo folder — exercises the
+  // "Browse folder" button on file cards (parent-folder navigation).
+  'folder-file': { name: 'inside-a-folder-clip.mp4', size: () => fs.statSync(FIXTURE).size }
 }
 
 function demoFolderTree () {
@@ -132,6 +135,13 @@ function demoFolderTree () {
             size: audioSize,
             modified: Date.now(),
             token: encodeToken({ demo: 'audio', name: 'bonus-tone.wav' })
+          },
+          {
+            type: 'file',
+            name: KINDS['folder-file'].name,
+            size: KINDS['folder-file'].size(),
+            modified: Date.now(),
+            token: encodeToken({ demo: 'folder-file' })
           },
           {
             type: 'folder',
@@ -180,7 +190,7 @@ export function createDemoSource (descriptor) {
     },
 
     async openRange (start, end) {
-      if (kind === 'video') {
+      if (kind === 'video' || kind === 'folder-file') {
         return fs.createReadStream(FIXTURE, { start, end })
       }
       if (kind === 'audio') {

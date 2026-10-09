@@ -105,7 +105,7 @@ export function parseMegaLink (raw) {
   throw new LinkError('Unrecognized MEGA link format. Paste a public file or folder link ("Get link" in MEGA).')
 }
 
-const DEMO_KINDS = new Set(['video', 'audio', 'file', 'folder'])
+const DEMO_KINDS = new Set(['video', 'audio', 'file', 'folder', 'folder-file'])
 const DEMO_NAME_RE = /^[\w .()\-+[\]]{1,120}$/
 
 /** Compact, shareable token that carries the source descriptor. */
@@ -140,7 +140,7 @@ export function decodeToken (token) {
 /** Descriptor -> token, given raw user input (URL or "demo:video"). */
 export function tokenFromInput (raw) {
   const s = String(raw || '').trim()
-  const demoMatch = /^demo:(video|audio|file|folder)$/i.exec(s)
+  const demoMatch = /^demo:(folder-file|video|audio|file|folder)$/i.exec(s)
   if (demoMatch) {
     const descriptor = { demo: demoMatch[1].toLowerCase() }
     return { descriptor, token: encodeToken(descriptor) }

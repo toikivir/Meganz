@@ -12,16 +12,21 @@ import { createHash } from 'node:crypto'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { File } from 'megajs'
+import { parseMegaLink, tokenFromInput, decodeToken, isFolderDescriptor } from '../server/links.js'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const PORT = 18777
-const BASE = `http://127.0.0.1:${PORT}`
 const FIXTURE = path.join(root, 'server', 'fixtures', 'demo-video.mp4')
 
 let server = null
 let cacheDir = null
 let passed = 0
 let failed = 0
+
+// Unique per run: avoids colliding with stale servers from earlier runs.
+const PORT = 18000 + Math.floor(Math.random() * 1900)
+const BOOT_ID = `smoke-${process.pid}-${Date.now()}`
+const BASE = `http://127.0.0.1:${PORT}`
 
 function ok (name, cond, extra = '') {
   if (cond) {
@@ -36,24 +41,46 @@ function ok (name, cond, extra = '') {
 async function startServer () {
   server = spawn(process.execPath, ['server/index.js'], {
     cwd: root,
-    env: { ...process.env, DEMO_MODE: '1', PORT: String(PORT), CACHE_DIR: cacheDir },
+    env: { ...process.env, DEMO_MODE: '1', PORT: String(PORT), CACHE_DIR: cacheDir, BOOT_ID },
     stdio: ['ignore', 'pipe', 'pipe']
   })
+  server.on('error', () => {})
   for (let i = 0; i < 50; i++) {
     try {
       const res = await fetch(`${BASE}/api/health`)
-      if (res.ok) return
+      const body = await res.json()
+      // Only trust the instance we just spawned.
+      if (res.ok && body.bootId === BOOT_ID) return
     } catch { /* not up yet */ }
     await new Promise((r) => setTimeout(r, 100))
   }
-  throw new Error('Server did not start')
+  throw new Error('Server did not start (or port was stolen by a stale instance)')
 }
 
 async function stopServer () {
   if (!server) return
-  server.kill('SIGTERM')
-  await new Promise((r) => server.on('exit', r))
+  const child = server
   server = null
+  const exited = new Promise((resolve) => child.on('exit', resolve))
+  child.kill('SIGTERM')
+  const timer = setTimeout(() => child.kill('SIGKILL'), 3000)
+  await exited
+  clearTimeout(timer)
+}
+
+// Never leave orphans behind, even on crash/Ctrl-C.
+process.on('exit', () => {
+  if (server) {
+    try { server.kill('SIGKILL') } catch { /* already gone */ }
+  }
+})
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.on(sig, () => {
+    if (server) {
+      try { server.kill('SIGKILL') } catch { /* already gone */ }
+    }
+    process.exit(1)
+  })
 }
 
 function patternBytes (absStart, length) {
@@ -76,6 +103,39 @@ function patternBytes (absStart, length) {
 
 async function run () {
   cacheDir = await mkdtemp(path.join(os.tmpdir(), 'megadirect-test-'))
+
+  // ---- URL contract between our link parser and the megajs SDK ----
+  // (pure JS, no network: this is the exact seam real folder links cross)
+  console.log('smoke: megajs URL contract')
+  {
+    const FOLDER_KEY = 'ZzYyXxWwVvTtRrQqPpOoNn' // 22-char folder key shape
+    const FILE_KEY = 'AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVv' // 43-char file key shape
+
+    const folderLink = parseMegaLink(`https://mega.nz/folder/AbCdEf123456#${FOLDER_KEY}`)
+    const f1 = File.fromURL(folderLink.canonical)
+    ok('folder URL parses as folder in megajs', f1.directory === true && f1.downloadId === 'AbCdEf123456' && !f1.loadedFile)
+    ok('folder descriptors are folders', isFolderDescriptor(tokenFromInput(folderLink.canonical).descriptor))
+
+    // The sub-file URLs minted by mega.js list() must parse back to loadedFile nodes
+    const subUrl = `https://mega.nz/folder/${folderLink.downloadId}#${folderLink.key}/file/SubNode99`
+    const subLink = parseMegaLink(subUrl)
+    const f2 = File.fromURL(subLink.canonical)
+    ok('mints valid file-in-folder URLs', subLink.kind === 'folder-file' && f2.directory === true && f2.loadedFile === 'SubNode99')
+    ok('file-in-folder descriptors are files', !isFolderDescriptor(tokenFromInput(subUrl).descriptor))
+
+    const fileLink = parseMegaLink(`https://mega.nz/file/AbCdEf123456#${FILE_KEY}`)
+    const f3 = File.fromURL(fileLink.canonical)
+    ok('file URL parses as file in megajs', f3.directory === false && f3.downloadId === 'AbCdEf123456')
+
+    const legacy = parseMegaLink(`https://mega.nz/#F!AbCdEf123456!${FOLDER_KEY}`)
+    const f4 = File.fromURL(legacy.canonical)
+    ok('legacy folder links normalize cleanly', legacy.kind === 'folder' && f4.directory === true)
+
+    const legacyFile = parseMegaLink(`https://mega.nz/#F!AbCdEf123456!${FOLDER_KEY}!SubNode99`)
+    const f5 = File.fromURL(legacyFile.canonical)
+    ok('legacy folder-file links normalize cleanly', legacyFile.kind === 'folder-file' && f5.loadedFile === 'SubNode99')
+  }
+
   console.log('smoke: starting server…')
   await startServer()
 
@@ -140,7 +200,7 @@ async function run () {
     })
     const folder = await folderRes.json()
     ok('demo folder resolves', folderRes.ok && folder.type === 'folder' && folder.name === 'MegaDirect Demo Folder')
-    ok('folder counts files', folder.counts.files === 5 && folder.counts.folders === 2)
+    ok('folder counts files', folder.counts.files === 6 && folder.counts.folders === 2)
     const nested = (folder.entries.find((e) => e.type === 'folder') || {}).children || []
     ok('nested folder tree', nested.some((e) => e.name === 'bonus-tone.wav') &&
       nested.some((e) => e.type === 'folder' && e.name === 'deep' && e.children.length === 1))
@@ -162,6 +222,15 @@ async function run () {
     ok('file token is not browsable', notFolder.status === 400)
     const folderStream = await fetch(`${BASE}/s/${folder.token}`)
     ok('folder token cannot be streamed', folderStream.status === 400)
+
+    // Files inside folders expose their parent folder ("Browse folder" button)
+    const inside = nested.find((e) => e.type === 'file' && e.name === 'inside-a-folder-clip.mp4')
+    ok('folder listing exposes inside-folder file', Boolean(inside))
+    const insideInfo = await (await fetch(`${BASE}/api/info/${inside.token}`)).json()
+    ok('inside-folder file links back to its folder',
+      Boolean(insideInfo.parent) && insideInfo.parent.token === folder.token)
+    const parentRes = await fetch(`${BASE}/api/folder/${insideInfo.parent.token}`)
+    ok('parent folder is browsable', parentRes.status === 200 && (await parentRes.json()).type === 'folder')
 
     console.log('smoke: error handling')
     const evil = await fetch(`${BASE}/api/info`, {
