@@ -37,7 +37,8 @@ const state = {
   player: null,
   pollTimer: null,
   lastCachedBytes: 0,
-  lastPollAt: 0
+  lastPollAt: 0,
+  folderContext: null // { token, info } while browsing a folder
 }
 
 // ---------------------------------------------------------------- UI helpers
@@ -56,14 +57,170 @@ function friendlyError (err) {
   return err.message || 'Something went wrong.'
 }
 
+// ---------------------------------------------------------------- folder browser
+const KIND_ICONS = { video: '🎬', audio: '🎵', image: '🖼️', other: '📦' }
+
+function fmtDate (ts) {
+  if (!ts) return ''
+  try {
+    return new Date(ts).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+  } catch {
+    return ''
+  }
+}
+
+function fileEntryToInfo (entry) {
+  return {
+    type: 'file',
+    token: entry.token,
+    name: entry.name,
+    size: entry.size,
+    mime: null,
+    kind: entry.kind,
+    playable: entry.playable,
+    demo: entry.demo || false,
+    links: entry.links
+  }
+}
+
+function renderTree (entries, container) {
+  for (const entry of entries) {
+    if (entry.type === 'folder') {
+      const wrap = document.createElement('div')
+      wrap.className = 'tree-folder open'
+
+      const head = document.createElement('button')
+      head.type = 'button'
+      head.className = 'tree-row folder-row'
+
+      const caret = document.createElement('span')
+      caret.className = 'tree-caret'
+      caret.textContent = '▾'
+      const icon = document.createElement('span')
+      icon.className = 'tree-icon'
+      icon.textContent = '📁'
+      const name = document.createElement('span')
+      name.className = 'tree-name'
+      name.textContent = entry.name
+      const meta = document.createElement('span')
+      meta.className = 'tree-meta'
+      meta.textContent = `${(entry.children || []).length} item${(entry.children || []).length === 1 ? '' : 's'}`
+
+      head.append(caret, icon, name, meta)
+
+      const kids = document.createElement('div')
+      kids.className = 'tree-kids'
+      renderTree(entry.children || [], kids)
+
+      head.addEventListener('click', () => {
+        const open = wrap.classList.toggle('open')
+        caret.textContent = open ? '▾' : '▸'
+      })
+
+      wrap.append(head, kids)
+      container.appendChild(wrap)
+    } else {
+      const row = document.createElement('button')
+      row.type = 'button'
+      row.className = 'tree-row file-row'
+
+      const icon = document.createElement('span')
+      icon.className = 'tree-icon'
+      icon.textContent = KIND_ICONS[entry.kind] || '📄'
+      const name = document.createElement('span')
+      name.className = 'tree-name'
+      name.textContent = entry.name
+      const meta = document.createElement('span')
+      meta.className = 'tree-meta'
+      meta.textContent = [
+        fmtBytes(entry.size),
+        fmtDate(entry.modified),
+        entry.playable ? '▶ playable' : ''
+      ].filter(Boolean).join(' · ')
+
+      row.append(icon, name, meta)
+
+      if (entry.playable) {
+        const badge = document.createElement('span')
+        badge.className = 'tree-badge'
+        badge.textContent = '▶'
+        row.appendChild(badge)
+      }
+      const dl = document.createElement('span')
+      dl.className = 'tree-dl'
+      dl.title = 'Download this file'
+      dl.textContent = '⤓'
+      dl.addEventListener('click', (e) => {
+        e.stopPropagation()
+        window.location.href = entry.links.download
+      })
+      row.appendChild(dl)
+
+      row.addEventListener('click', () => {
+        selectFolderFile(entry)
+      })
+
+      container.appendChild(row)
+    }
+  }
+}
+
+function showFolder (info) {
+  state.info = null
+  state.folderContext = { token: info.token, info }
+  if (state.player) {
+    state.player.destroy()
+    state.player = null
+  }
+  $('player-card').hidden = true
+  $('file-card').style.display = 'none'
+  $('back-btn').hidden = true
+
+  const card = $('folder-card')
+  card.hidden = false
+  $('folder-title').textContent = info.name
+  $('folder-title').title = info.name
+  const c = info.counts || { files: 0, folders: 0, bytes: 0 }
+  $('folder-sub').textContent =
+    `${c.files} file${c.files === 1 ? '' : 's'}${c.folders ? ` · ${c.folders} sub-folder${c.folders === 1 ? '' : 's'}` : ''} · ${fmtBytes(c.bytes)}`
+  $('folder-badge').textContent = info.truncated ? 'folder (partial listing)' : 'folder'
+
+  const tree = $('folder-tree')
+  tree.textContent = ''
+  renderTree(info.entries || [], tree)
+
+  $('result').hidden = false
+  $('result').scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+function hideFolder () {
+  state.folderContext = null
+  $('folder-card').hidden = true
+  $('back-btn').hidden = true
+}
+
+function selectFolderFile (entry) {
+  const info = fileEntryToInfo(entry)
+  showFile(info)
+  const back = $('back-btn')
+  back.hidden = !state.folderContext
+  back.onclick = () => {
+    if (state.folderContext) {
+      const ctx = state.folderContext
+      history.replaceState(null, '', `/v/${ctx.token}`)
+      showFolder(ctx.info)
+    }
+  }
+}
+
 // ---------------------------------------------------------------- result card
 function showFile (info) {
   state.info = info
   const result = $('result')
   result.hidden = false
+  $('file-card').style.display = ''
 
-  const icons = { video: '🎬', audio: '🎵', image: '🖼️', other: '📦' }
-  $('file-icon').textContent = icons[info.kind] || '📄'
+  $('file-icon').textContent = KIND_ICONS[info.kind] || '📄'
   $('file-name').textContent = info.name
   $('file-name').title = info.name
   $('file-size').textContent = fmtBytes(info.size)
@@ -168,9 +325,16 @@ async function resolveInput (payload) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     })
-    setFormStatus(`Ready: ${info.name}`, 'ok')
-    history.replaceState(null, '', info.links.watch)
-    showFile(info)
+    if (info.type === 'folder') {
+      setFormStatus(`Ready: ${info.name}`, 'ok')
+      history.replaceState(null, '', `/v/${info.token}`)
+      showFolder(info)
+    } else {
+      setFormStatus(`Ready: ${info.name}`, 'ok')
+      history.replaceState(null, '', info.links.watch)
+      hideFolder()
+      showFile(info)
+    }
   } catch (err) {
     setFormStatus(friendlyError(err), 'error')
   } finally {
@@ -213,13 +377,18 @@ async function boot () {
   // Watch page: /v/<token>
   const m = /^\/v\/([\w-]+)$/.exec(location.pathname)
   if (m) {
-    setFormStatus('Loading file…')
+    setFormStatus('Loading…')
     try {
       const info = await api(`/api/info/${m[1]}`)
       setFormStatus(`Ready: ${info.name}`, 'ok')
       $('link-input').value = ''
-      showFile(info)
-      if (info.playable) openPlayer(info)
+      if (info.type === 'folder') {
+        showFolder(info)
+      } else {
+        hideFolder()
+        showFile(info)
+        if (info.playable) openPlayer(info)
+      }
     } catch (err) {
       setFormStatus(friendlyError(err), 'error')
     }

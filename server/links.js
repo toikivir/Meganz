@@ -1,11 +1,13 @@
 /**
  * Parsing, validation and tokenisation of MEGA links.
  *
- * Supported public link formats (single files and single files out of folders):
- *   https://mega.nz/file/<id>#<key>
- *   https://mega.nz/folder/<id>#<key>/file/<sub>
- *   https://mega.nz/#!<id>!<key>
- *   https://mega.nz/#F!<id>!<key>!<sub>
+ * Supported public link formats:
+ *   https://mega.nz/file/<id>#<key>                  single file
+ *   https://mega.nz/#!<id>!<key>                     single file (legacy)
+ *   https://mega.nz/folder/<id>#<key>                folder (browse & pick files)
+ *   https://mega.nz/#F!<id>!<key>                    folder (legacy)
+ *   https://mega.nz/folder/<id>#<key>/file/<sub>     file inside a folder
+ *   https://mega.nz/#F!<id>!<key>!<sub>              file inside a folder (legacy)
  *   (same with mega.co.nz, and with or without the https:// prefix)
  */
 
@@ -44,7 +46,7 @@ export function parseMegaLink (raw) {
   const url = normalizeInput(raw)
   const hash = url.hash || ''
 
-  // New style: /file/<id>#<key>  |  /folder/<id>#<key>/file/<sub>
+  // New style: /file/<id>#<key>  |  /folder/<id>#<key>  |  /folder/<id>#<key>/file/<sub>
   const pathMatch = url.pathname.match(/^\/(file|folder)\/([\w-]+)$/)
   if (pathMatch) {
     const [, type, downloadId] = pathMatch
@@ -55,10 +57,13 @@ export function parseMegaLink (raw) {
       throw new LinkError('That link is missing its decryption key.')
     }
     if (type === 'folder' && !loadedFile) {
-      throw new LinkError(
-        'Folder links are not supported yet. Open the folder on MEGA and copy the link of a single file inside it.',
-        'FOLDER'
-      )
+      return {
+        kind: 'folder',
+        downloadId,
+        key,
+        loadedFile: undefined,
+        canonical: `https://mega.nz/folder/${downloadId}#${key}`
+      }
     }
     return {
       kind: type === 'folder' ? 'folder-file' : 'file',
@@ -71,17 +76,20 @@ export function parseMegaLink (raw) {
     }
   }
 
-  // Old style: #!<id>!<key>  |  #F!<id>!<key>!<sub>
+  // Old style: #!<id>!<key>  |  #F!<id>!<key>  |  #F!<id>!<key>!<sub>
   const split = hash.split('!')
   if ((split[0] === '#' || split[0] === '#F') && split.length >= 3) {
     const folder = split[0] === '#F'
     const [, downloadId, key, loadedFile] = split
     if (!downloadId || !key) throw new LinkError('That link is missing its decryption key.')
     if (folder && !loadedFile) {
-      throw new LinkError(
-        'Folder links are not supported yet. Open the folder on MEGA and copy the link of a single file inside it.',
-        'FOLDER'
-      )
+      return {
+        kind: 'folder',
+        downloadId,
+        key,
+        loadedFile: undefined,
+        canonical: `https://mega.nz/folder/${downloadId}#${key}`
+      }
     }
     return {
       kind: folder ? 'folder-file' : 'file',
@@ -94,10 +102,11 @@ export function parseMegaLink (raw) {
     }
   }
 
-  throw new LinkError('Unrecognized MEGA link format. Paste a public file link ("Get link" in MEGA).')
+  throw new LinkError('Unrecognized MEGA link format. Paste a public file or folder link ("Get link" in MEGA).')
 }
 
-const DEMO_KINDS = new Set(['video', 'audio', 'file'])
+const DEMO_KINDS = new Set(['video', 'audio', 'file', 'folder'])
+const DEMO_NAME_RE = /^[\w .()\-+[\]]{1,120}$/
 
 /** Compact, shareable token that carries the source descriptor. */
 export function encodeToken (descriptor) {
@@ -116,11 +125,14 @@ export function decodeToken (token) {
   }
   if (parsed && parsed.demo) {
     if (!DEMO_KINDS.has(parsed.demo)) throw new LinkError('Unknown demo file.')
-    return { demo: parsed.demo }
+    const descriptor = { demo: parsed.demo }
+    // Optional display-name override used by demo folder entries.
+    if (typeof parsed.name === 'string' && DEMO_NAME_RE.test(parsed.name)) descriptor.name = parsed.name
+    return descriptor
   }
   if (parsed && typeof parsed.u === 'string') {
-    const link = parseMegaLink(parsed.u) // re-validates host + format
-    return link
+    // Re-validate, and normalise so descriptors are canonical (cache ids match).
+    return { u: parseMegaLink(parsed.u).canonical }
   }
   throw new LinkError('Invalid link token.')
 }
@@ -128,10 +140,18 @@ export function decodeToken (token) {
 /** Descriptor -> token, given raw user input (URL or "demo:video"). */
 export function tokenFromInput (raw) {
   const s = String(raw || '').trim()
-  if (/^demo:(video|audio|file)$/i.test(s)) {
-    return { descriptor: { demo: s.split(':')[1].toLowerCase() }, token: encodeToken({ demo: s.split(':')[1].toLowerCase() }) }
+  const demoMatch = /^demo:(video|audio|file|folder)$/i.exec(s)
+  if (demoMatch) {
+    const descriptor = { demo: demoMatch[1].toLowerCase() }
+    return { descriptor, token: encodeToken(descriptor) }
   }
   const link = parseMegaLink(s)
   const descriptor = { u: link.canonical }
   return { descriptor, token: encodeToken(descriptor) }
+}
+
+/** True when a descriptor points at a browsable folder (not a single file). */
+export function isFolderDescriptor (descriptor) {
+  if (descriptor.demo) return descriptor.demo === 'folder'
+  return parseMegaLink(descriptor.u).kind === 'folder'
 }

@@ -52,12 +52,28 @@
         <button class="chip" data-demo="video">▶&nbsp; Demo video</button>
         <button class="chip" data-demo="audio">♫&nbsp; Demo audio</button>
         <button class="chip" data-demo="file">⤓&nbsp; Demo file</button>
+        <button class="chip" data-demo="folder">📁&nbsp; Demo folder</button>
       </div>
     </section>
 
     <!-- ============================ RESULT ============================ -->
     <section class="result" id="result" hidden>
-      <div class="card file-card">
+      <div class="card folder-card" id="folder-card" hidden>
+        <div class="folder-head">
+          <div class="file-icon folder-icon" aria-hidden="true">📁</div>
+          <div class="file-meta">
+            <h2 id="folder-title">—</h2>
+            <div class="file-sub">
+              <span id="folder-sub">—</span>
+              <span class="badge-mini" id="folder-badge">folder</span>
+            </div>
+          </div>
+        </div>
+        <p class="folder-hint">Click a file to download it or play it online. Sub-folders open inline.</p>
+        <div class="folder-tree" id="folder-tree"></div>
+      </div>
+
+      <div class="card file-card" id="file-card">
         <div class="file-icon" id="file-icon" aria-hidden="true">📄</div>
         <div class="file-meta">
           <h2 id="file-name">—</h2>
@@ -69,6 +85,7 @@
           </div>
         </div>
         <div class="file-actions">
+          <button class="btn btn-ghost" id="back-btn" hidden>← Folder</button>
           <a class="btn btn-primary" id="download-btn" href="#">⤓ Download</a>
           <button class="btn btn-ghost" id="play-btn" hidden>▶ Play online</button>
           <button class="btn btn-ghost" id="copy-btn">⧉ Copy link</button>
@@ -140,6 +157,11 @@
           <h3>Watch page included</h3>
           <p>Share a watch link and anyone can play the video in the browser immediately — no account, no MEGA app, no "download limit exceeded".</p>
         </div>
+        <div class="card feature">
+          <div class="feature-icon">📁</div>
+          <h3>Folder links work too</h3>
+          <p>Paste a shared folder link and browse its tree right here — sub-folders expand inline, and every file gets its own download button and player.</p>
+        </div>
       </div>
     </section>
 
@@ -175,7 +197,7 @@
         </details>
         <details class="card">
           <summary>Which links are supported?</summary>
-          <p>Public single-file links in any format: <code>mega.nz/file/…#…</code>, <code>mega.nz/#!…!…</code>, and links to a file inside a shared folder (<code>/folder/…#…/file/…</code>). Plain folder links are not supported — open the folder and copy the link of a single file.</p>
+          <p>Public file links in any format: <code>mega.nz/file/…#…</code>, <code>mega.nz/#!…!…</code>, links to a file inside a shared folder (<code>/folder/…#…/file/…</code>) — and full <strong>folder links</strong>: paste <code>/folder/…#…</code> and browse the folder tree right here to pick the files you want.</p>
         </details>
         <details class="card">
           <summary>What can the online player play?</summary>

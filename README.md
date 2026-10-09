@@ -17,8 +17,10 @@ exceeded" screens.
   work with any download manager, pause/resume included.
 - ▶ **Watch pages** — share `/v/<token>` and anyone can play the file in the browser, no account
   and no MEGA app required.
-- 🧩 **All public link formats** — `mega.nz/file/…#…`, `mega.nz/#!…!…`, and single files inside
-  shared folders (`/folder/…#…/file/…`).
+- 🧩 **All public link formats** — `mega.nz/file/…#…`, `mega.nz/#!…!…`, files inside shared
+  folders (`/folder/…#…/file/…`), and **full folder links** with an in-page tree browser.
+- 📁 **Folder browsing** — paste a folder link, expand sub-folders inline, and download or play
+  any file you pick — each one gets its own direct link and player.
 - 🚫 **No accounts, no tracking** — no login, no analytics; link keys live only inside the token
   and the server cache.
 
@@ -64,15 +66,17 @@ an eye on it if you host large public files.
 | --- | --- | --- |
 | New file link | `https://mega.nz/file/AbCd1234#Key` | ✅ |
 | Legacy file link | `https://mega.nz/#!AbCd1234!Key` | ✅ |
+| Folder link | `https://mega.nz/folder/AbCd#Key` | ✅ browse & pick files |
+| Legacy folder link | `https://mega.nz/#F!AbCd1234!Key` | ✅ browse & pick files |
 | File inside folder | `https://mega.nz/folder/AbCd#Key/file/Sub123` | ✅ |
-| Plain folder link | `https://mega.nz/folder/AbCd#Key` | ❌ (open the folder, copy a file link) |
 
 ## API
 
 | Route | Description |
 | --- | --- |
-| `POST /api/info` `{url}` | Resolve a MEGA link → `{token, name, size, mime, kind, playable, links}` |
+| `POST /api/info` `{url}` | Resolve a link → file info or a folder tree with per-file tokens |
 | `GET /api/info/:token` | Same, for an existing token |
+| `GET /api/folder/:token` | Folder tree: names, sizes, playable flags, per-file tokens |
 | `GET /api/state/:token` | Cache state: cached byte ranges, progress, errors |
 | `GET /s/:token` | Stream inline (range-capable) — used by the player |
 | `GET /d/:token` | Download as attachment (range-capable, resumable) |
@@ -116,9 +120,11 @@ test/smoke.mjs      End-to-end smoke test (demo mode)
 
 ## Limitations
 
-- Only public single-file links (see table above). MEGA folder browsing is not implemented.
+- Only **public** links work (files, folders, and files inside folders — see table above).
+  MEGA requires a login for everything else.
 - Playback is limited to formats the browser can decode (MP4/H.264, WebM, OGG, MP3, WAV, FLAC,
   M4A, Opus…). Everything else is still downloadable.
+- Folder listings show up to 1000 entries / 8 levels deep per request.
 - The server needs outbound HTTPS access to `mega.nz` and MEGA's download servers.
 
 ## Disclaimer

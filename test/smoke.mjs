@@ -132,6 +132,37 @@ async function run () {
     const segBytes = Buffer.from(await seg.arrayBuffer())
     ok('demo pattern range matches generator', segBytes.equals(patternBytes(5000000, 200)))
 
+    console.log('smoke: folder browsing')
+    const folderRes = await fetch(`${BASE}/api/info`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ demo: 'folder' })
+    })
+    const folder = await folderRes.json()
+    ok('demo folder resolves', folderRes.ok && folder.type === 'folder' && folder.name === 'MegaDirect Demo Folder')
+    ok('folder counts files', folder.counts.files === 5 && folder.counts.folders === 2)
+    const nested = (folder.entries.find((e) => e.type === 'folder') || {}).children || []
+    ok('nested folder tree', nested.some((e) => e.name === 'bonus-tone.wav') &&
+      nested.some((e) => e.type === 'folder' && e.name === 'deep' && e.children.length === 1))
+    ok('folder entries carry links', Boolean(folder.entries[0].links && folder.entries[0].links.download))
+
+    const folderVideo = folder.entries.find((e) => e.type === 'file' && e.name.endsWith('.mp4'))
+    const fv = await fetch(`${BASE}/api/info/${folderVideo.token}`)
+    const fvInfo = await fv.json()
+    ok('file picked from folder resolves', fvInfo.type === 'file' && fvInfo.name === 'MegaDirect-demo-plasma.mp4')
+    const fvBytes = Buffer.from(await (await fetch(`${BASE}/s/${folderVideo.token}`, {
+      headers: { Range: 'bytes=0-99' }
+    })).arrayBuffer())
+    ok('folder-picked file streams correctly', fvBytes.equals(fixture.subarray(0, 100)))
+
+    const deepClip = nested.find((e) => e.type === 'folder' && e.name === 'deep').children[0]
+    ok('deeply nested file has token', typeof deepClip.token === 'string' && deepClip.token.length > 8)
+
+    const notFolder = await fetch(`${BASE}/api/folder/${folderVideo.token}`)
+    ok('file token is not browsable', notFolder.status === 400)
+    const folderStream = await fetch(`${BASE}/s/${folder.token}`)
+    ok('folder token cannot be streamed', folderStream.status === 400)
+
     console.log('smoke: error handling')
     const evil = await fetch(`${BASE}/api/info`, {
       method: 'POST',
@@ -139,13 +170,6 @@ async function run () {
       body: JSON.stringify({ url: 'https://evil.example.com/file/x#y' })
     })
     ok('rejects non-MEGA hosts', evil.status === 400)
-
-    const folder = await fetch(`${BASE}/api/info`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: 'https://mega.nz/folder/AbCdEf123#SomeKey' })
-    })
-    ok('rejects plain folder links', folder.status === 400)
 
     console.log('smoke: cache persistence across restart')
     await stopServer()

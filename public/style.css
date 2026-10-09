@@ -359,6 +359,113 @@ em { font-style: normal; background: var(--grad); -webkit-background-clip: text;
   color: var(--text-faint);
 }
 
+/* ------------------------------------------------ folder browser */
+.folder-card {
+  padding: 24px;
+  display: grid;
+  gap: 14px;
+}
+
+.folder-head {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+}
+
+.folder-icon {
+  background: linear-gradient(135deg, #fbbf24, #f97316);
+  box-shadow: 0 10px 26px rgba(249, 115, 22, 0.3);
+}
+
+.folder-hint {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 0.88rem;
+}
+
+.folder-tree {
+  max-height: 440px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 0.95rem;
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s;
+}
+.file-row:hover { background: rgba(255, 255, 255, 0.08); }
+.folder-row:hover { background: rgba(255, 255, 255, 0.05); }
+.folder-row { font-weight: 600; }
+
+.tree-caret {
+  width: 1em;
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+.tree-icon {
+  width: 1.6em;
+  text-align: center;
+  flex-shrink: 0;
+}
+.tree-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tree-meta {
+  color: var(--text-faint);
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+.tree-badge {
+  color: var(--accent-3);
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+.tree-dl {
+  opacity: 0;
+  padding: 4px 9px;
+  border-radius: 8px;
+  color: var(--text-dim);
+  font-size: 0.95rem;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+.file-row:hover .tree-dl { opacity: 1; }
+.tree-dl:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+
+.tree-kids {
+  margin-left: 22px;
+  border-left: 1px solid var(--border);
+  padding-left: 6px;
+}
+.tree-folder:not(.open) > .tree-kids { display: none; }
+
+@media (max-width: 700px) {
+  .tree-meta { display: none; }
+  .tree-dl { opacity: 1; }
+}
+
 /* ------------------------------------------------ player */
 .player-card { padding: 16px; }
 

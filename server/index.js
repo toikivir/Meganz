@@ -2,7 +2,7 @@ import express from 'express'
 import path from 'node:path'
 import { config } from './config.js'
 import { CacheStore, FillError } from './cache.js'
-import { tokenFromInput, decodeToken, LinkError } from './links.js'
+import { tokenFromInput, decodeToken, isFolderDescriptor, LinkError } from './links.js'
 import { mediaInfo, contentDisposition } from './mime.js'
 import { parseRange } from './ranges.js'
 import { createMegaSource } from './sources/mega.js'
@@ -78,6 +78,7 @@ async function entryForToken (token) {
 function describeEntry (entry, token) {
   const media = mediaInfo(entry.name)
   return {
+    type: 'file',
     token,
     name: entry.name,
     size: entry.size,
@@ -91,6 +92,84 @@ function describeEntry (entry, token) {
       download: `/d/${token}`
     }
   }
+}
+
+function enrichEntries (entries) {
+  return entries.map((e) => {
+    if (e.type === 'folder') {
+      return { type: 'folder', name: e.name, children: enrichEntries(e.children || []) }
+    }
+    const media = mediaInfo(e.name)
+    return {
+      type: 'file',
+      name: e.name,
+      size: typeof e.size === 'number' ? e.size : 0,
+      modified: typeof e.modified === 'number' ? e.modified : null,
+      kind: media.kind,
+      playable: media.playable,
+      token: e.token,
+      links: {
+        watch: `/v/${e.token}`,
+        stream: `/s/${e.token}`,
+        download: `/d/${e.token}`
+      }
+    }
+  })
+}
+
+function countEntries (entries) {
+  const counts = { files: 0, folders: 0, bytes: 0 }
+  for (const e of entries) {
+    if (e.type === 'folder') {
+      counts.folders++
+      const sub = countEntries(e.children || [])
+      counts.files += sub.files
+      counts.folders += sub.folders
+      counts.bytes += sub.bytes
+    } else {
+      counts.files++
+      counts.bytes += e.size || 0
+    }
+  }
+  return counts
+}
+
+// Folder listings are cached briefly: browsing clicks should not re-hit MEGA.
+const folderListings = new Map()
+const FOLDER_LISTING_TTL = 60_000
+
+async function folderInfo (descriptor, token) {
+  const key = JSON.stringify(descriptor)
+  const hit = folderListings.get(key)
+  if (hit && hit.expires > Date.now()) {
+    return { ...hit.data, token }
+  }
+  const source = sourceFactory(descriptor)
+  const listing = await source.list()
+  const entries = enrichEntries(listing.entries)
+  const data = {
+    type: 'folder',
+    name: listing.name,
+    entries,
+    counts: countEntries(entries),
+    truncated: Boolean(listing.truncated),
+    demo: Boolean(descriptor.demo)
+  }
+  if (folderListings.size > 200) folderListings.clear()
+  folderListings.set(key, { expires: Date.now() + FOLDER_LISTING_TTL, data })
+  return { ...data, token }
+}
+
+async function infoForToken (token) {
+  const descriptor = decodeToken(token)
+  if (isFolderDescriptor(descriptor)) {
+    return folderInfo(descriptor, token)
+  }
+  const entry = await store.getEntry(descriptor, async (source) => {
+    const info = await source.resolve()
+    return { name: info.name, size: info.size, mime: mediaInfo(info.name).mime }
+  })
+  return describeEntry(entry, token)
 }
 
 function serveEntry (req, res, entry, { attachment }) {
@@ -167,13 +246,19 @@ app.post('/api/info', resolveLimiter, wrap(async (req, res) => {
   let input = body.url
   if (!input && body.demo) input = `demo:${body.demo}`
   const { token } = tokenFromInput(input)
-  const entry = await entryForToken(token)
-  res.json(describeEntry(entry, token))
+  res.json(await infoForToken(token))
 }))
 
 app.get('/api/info/:token', resolveLimiter, wrap(async (req, res) => {
-  const entry = await entryForToken(req.params.token)
-  res.json(describeEntry(entry, req.params.token))
+  res.json(await infoForToken(req.params.token))
+}))
+
+app.get('/api/folder/:token', resolveLimiter, wrap(async (req, res) => {
+  const descriptor = decodeToken(req.params.token)
+  if (!isFolderDescriptor(descriptor)) {
+    throw new FillError('This link is a single file, not a folder.', { code: 'NOT_FOLDER', status: 400 })
+  }
+  res.json(await folderInfo(descriptor, req.params.token))
 }))
 
 app.get('/api/state/:token', apiLimiter, wrap(async (req, res) => {

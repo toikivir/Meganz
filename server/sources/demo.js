@@ -7,6 +7,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 import { config } from '../config.js'
+import { FillError } from '../cache.js'
+import { encodeToken } from '../links.js'
 
 const FIXTURE = path.join(config.root, 'server', 'fixtures', 'demo-video.mp4')
 const DEMO_FILE_SIZE = 24 * 1024 * 1024
@@ -55,6 +57,7 @@ function buildWav () {
 
 function patternChunk (absStart, length) {
   const buf = Buffer.allocUnsafe(length)
+  const tail = Buffer.alloc(4)
   for (let i = 0; i < length; i += 4) {
     let x = (((absStart + i) >>> 2) + 0x9e3779b9) >>> 0
     x ^= x << 13
@@ -65,8 +68,7 @@ function patternChunk (absStart, length) {
     if (i + 4 <= length) {
       buf.writeUInt32LE(x, i)
     } else {
-      const tail = Buffer.allocUnsafe(4)
-      tail.writeUInt32LE(x)
+      tail.writeUInt32LE(x, 0)
       tail.copy(buf, i)
     }
   }
@@ -86,19 +88,95 @@ function patternStream (start, end) {
   return Readable.from(generate())
 }
 
+const KINDS = {
+  video: { name: 'MegaDirect-demo-plasma.mp4', size: () => fs.statSync(FIXTURE).size },
+  audio: { name: 'demo-soundtrack.wav', size: () => buildWav().length },
+  file: { name: 'demo-archive.bin', size: () => DEMO_FILE_SIZE }
+}
+
+function demoFolderTree () {
+  const videoSize = KINDS.video.size()
+  const audioSize = KINDS.audio.size()
+  return {
+    name: 'MegaDirect Demo Folder',
+    truncated: false,
+    entries: [
+      {
+        type: 'file',
+        name: KINDS.video.name,
+        size: videoSize,
+        modified: Date.now(),
+        token: encodeToken({ demo: 'video' })
+      },
+      {
+        type: 'file',
+        name: KINDS.audio.name,
+        size: audioSize,
+        modified: Date.now(),
+        token: encodeToken({ demo: 'audio' })
+      },
+      {
+        type: 'file',
+        name: KINDS.file.name,
+        size: DEMO_FILE_SIZE,
+        modified: Date.now(),
+        token: encodeToken({ demo: 'file' })
+      },
+      {
+        type: 'folder',
+        name: 'bonus',
+        children: [
+          {
+            type: 'file',
+            name: 'bonus-tone.wav',
+            size: audioSize,
+            modified: Date.now(),
+            token: encodeToken({ demo: 'audio', name: 'bonus-tone.wav' })
+          },
+          {
+            type: 'folder',
+            name: 'deep',
+            children: [
+              {
+                type: 'file',
+                name: 'deep-clip.mp4',
+                size: videoSize,
+                modified: Date.now(),
+                token: encodeToken({ demo: 'video', name: 'deep-clip.mp4' })
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
+
 export function createDemoSource (descriptor) {
   const kind = descriptor.demo
-  const meta = {
-    video: { name: 'MegaDirect-demo-plasma.mp4', size: () => fs.statSync(FIXTURE).size },
-    audio: { name: 'demo-soundtrack.wav', size: () => buildWav().length },
-    file: { name: 'demo-archive.bin', size: () => DEMO_FILE_SIZE }
-  }[kind]
+  const meta = KINDS[kind]
 
   return {
     kind: 'demo',
 
     async resolve () {
-      return { name: meta.name, size: meta.size() }
+      if (kind === 'folder') {
+        throw new FillError('This link points at a folder — browse it to pick files.', {
+          code: 'IS_FOLDER',
+          status: 400
+        })
+      }
+      return {
+        name: (descriptor.name && String(descriptor.name)) || meta.name,
+        size: meta.size()
+      }
+    },
+
+    async list () {
+      if (kind !== 'folder') {
+        throw new FillError('This link is a single file, not a folder.', { code: 'NOT_FOLDER', status: 400 })
+      }
+      return demoFolderTree()
     },
 
     async openRange (start, end) {
